@@ -69,15 +69,35 @@ def run_agent(pnr: str, last_name: str, message: str) -> str:
         messages=messages,
     )
 
-        turns = 0
+    turns = 0
     while response.stop_reason == "tool_use" and turns < MAX_TOOL_CALLS:
+        # Keep the assistant tool_use blocks and their IDs in the conversation.
+        assistant_blocks = response.model_dump(exclude_none=True)["content"]
+        results = tool_results(response)
+
+        # Confirm every tool result points to a tool call in the preceding message.
+        assistant_ids = {
+            block["id"]
+            for block in assistant_blocks
+            if block.get("type") == "tool_use"
+        }
+        result_ids = {
+            block["tool_use_id"]
+            for block in results
+            if block.get("type") == "tool_result"
+        }
+        if not result_ids.issubset(assistant_ids):
+            raise RuntimeError(
+                f"Tool ID mismatch: assistant={assistant_ids}, results={result_ids}"
+            )
+
         messages.append({
             "role": "assistant",
-            "content": response.content,
+            "content": assistant_blocks,
         })
         messages.append({
             "role": "user",
-            "content": tool_results(response),
+            "content": results,
         })
 
         response = client.messages.create(
