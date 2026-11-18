@@ -52,7 +52,7 @@ def tool_results(response) -> List[Dict[str, Any]]:
     return results
 
 
-def run_agent(pnr: str, last_name: str, message: str) -> str:            # ✏️ Build 1, step 1.2
+def run_agent(pnr: str, last_name: str, message: str) -> str:
     """Run the tool loop until Claude stops asking for tools. Return its final text."""
     client, tracer = new_session()
     tools = tool_list()
@@ -61,23 +61,36 @@ def run_agent(pnr: str, last_name: str, message: str) -> str:            # ✏�
     ]
 
     response = client.messages.create(
-        model=MODEL, max_tokens=4096, system=runtime_preamble() + SYSTEM_PROMPT + TONE_ADDENDUM,
-        thinking={"type": "adaptive"}, tools=tools, messages=messages,
+        model=MODEL,
+        max_tokens=4096,
+        system=runtime_preamble() + SYSTEM_PROMPT + TONE_ADDENDUM,
+        thinking={"type": "adaptive"},
+        tools=tools,
+        messages=messages,
     )
 
-    answer = ""
-    turns = 1
+    turns = 0
     while response.stop_reason == "tool_use" and turns < MAX_TOOL_CALLS:
-        messages.append({"role": "assistant", "content": text_of(response)})
-        messages.append({"role": "user", "content": tool_results(response)})
-        answer = text_of(response)
+        messages.append({
+            "role": "assistant",
+            "content": response.content,
+        })
+        messages.append({
+            "role": "user",
+            "content": tool_results(response),
+        })
+
         response = client.messages.create(
-            model=MODEL, max_tokens=4096, system=runtime_preamble() + SYSTEM_PROMPT + TONE_ADDENDUM,
-            thinking={"type": "adaptive"}, tools=tools, messages=messages,
+            model=MODEL,
+            max_tokens=4096,
+            system=runtime_preamble() + SYSTEM_PROMPT + TONE_ADDENDUM,
+            thinking={"type": "adaptive"},
+            tools=tools,
+            messages=messages,
         )
         turns += 1
 
-    return answer
+    return text_of(response)
 
 
 def tool_list() -> List[Dict[str, Any]]:                   # ✏️ Build 2, step 2.2
