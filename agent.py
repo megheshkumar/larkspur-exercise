@@ -70,7 +70,8 @@ def run_agent(pnr: str, last_name: str, message: str) -> str:
     )
 
     turns = 0
-        while response.stop_reason == "tool_use" and turns < MAX_TOOL_CALLS:
+    while response.stop_reason == "tool_use" and turns < MAX_TOOL_CALLS:
+        # Preserve the assistant's exact tool-use IDs.
         assistant_blocks = [
             block.model_dump(exclude_none=True)
             if hasattr(block, "model_dump")
@@ -78,11 +79,13 @@ def run_agent(pnr: str, last_name: str, message: str) -> str:
             for block in response.content
         ]
 
+        # First add Claude's tool_use message.
         messages.append({
             "role": "assistant",
             "content": assistant_blocks,
         })
 
+        # Then add the matching tool_result message.
         messages.append({
             "role": "user",
             "content": tool_results(response),
