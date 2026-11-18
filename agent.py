@@ -8,8 +8,8 @@ before the code does, so read the trace first:
 Where you edit:   grep -n '✏' agent.py   (six marks, one per place)
 Steps and gates:  https://anthropicpartnerbasecamp.bts.com/
 """
-from datetime import datetime
 from __future__ import annotations
+from datetime import datetime
 from typing import Any, Dict, List
 from support import (MODEL, SYSTEM_PROMPT, call_local, execute_tool, mcp_client,
                      new_session, next_available_day, record_tool_result,
@@ -29,24 +29,24 @@ def text_of(response) -> str:
 
 
 def tool_results(response) -> List[Dict[str, Any]]:
-    """Run tool calls and return results, normalizing flight dates first."""
+    """Run tool calls and normalize the flight date before dispatch."""
     results = []
     for block in response.content:
         if getattr(block, "type", None) != "tool_use":
             continue
 
-        # The backend requires YYYY-MM-DD. Normalize MM/DD/YYYY if the model
-        # supplies that format despite the schema instructions.
         tool_input = dict(block.input or {})
+
         if block.name == "get_flight_status":
-            flight_date = tool_input.get("date")
-            if flight_date:
+            value = tool_input.get("date")
+            if isinstance(value, str):
                 try:
-                    parsed_date = datetime.strptime(flight_date, "%m/%d/%Y")
+                    tool_input["date"] = datetime.strptime(
+                        value.strip(), "%m/%d/%Y"
+                    ).strftime("%Y-%m-%d")
                 except ValueError:
-                    pass  # Already ISO, or invalid; let the tool validate it.
-                else:
-                    tool_input["date"] = parsed_date.strftime("%Y-%m-%d")
+                    # Leave an already-ISO date unchanged.
+                    pass
 
         if block.name in mcp_client.tool_names:
             output = mcp_client.call_remote(block.name, tool_input)
@@ -61,7 +61,6 @@ def tool_results(response) -> List[Dict[str, Any]]:
             "content": str(output),
         })
     return results
-
 
 def run_agent(pnr: str, last_name: str, message: str) -> str:
     """Run the tool loop until Claude stops asking for tools. Return its final text."""
