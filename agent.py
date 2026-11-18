@@ -69,22 +69,38 @@ def run_agent(pnr: str, last_name: str, message: str) -> str:
         messages=messages,
     )
 
-            turns = 0
+    turns = 0
     while response.stop_reason == "tool_use" and turns < MAX_TOOL_CALLS:
-        assistant_blocks = [
-            block.model_dump(exclude_none=True)
-            if hasattr(block, "model_dump")
-            else dict(block)
-            for block in response.content
-        ]
+        # Keep the original assistant tool_use blocks and IDs intact.
+        assistant_blocks = response.model_dump(exclude_none=True)["content"]
 
+        # Build tool results from this same response.
+        results = tool_results(response)
+
+        # Ensure each result matches a tool call in the assistant message.
+        assistant_ids = {
+            block["id"]
+            for block in assistant_blocks
+            if block.get("type") == "tool_use"
+        }
+        result_ids = {
+            block["tool_use_id"]
+            for block in results
+            if block.get("type") == "tool_result"
+        }
+        if not result_ids.issubset(assistant_ids):
+            raise RuntimeError(
+                f"Tool ID mismatch: assistant={assistant_ids}, results={result_ids}"
+            )
+
+        # The assistant tool call must immediately precede the user tool result.
         messages.append({
             "role": "assistant",
             "content": assistant_blocks,
         })
         messages.append({
             "role": "user",
-            "content": tool_results(response),
+            "content": results,
         })
 
         response = client.messages.create(
