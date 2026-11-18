@@ -40,24 +40,27 @@ def tool_results(response) -> List[Dict[str, Any]]:
 
         # Normalize the date at the dispatch boundary as a safeguard, even if the
         # model returns a booking-style date instead of the format in the schema.
-        if block.name.split("__")[-1] == "get_flight_status":
+               # Convert booking-style dates before dispatching the tool call.
+        if "get_flight_status" in block.name:
             value = tool_input.get("date")
             if isinstance(value, str):
                 value = value.strip()
-                try:
-                    parsed = datetime.strptime(value, "%Y-%m-%d")
-                except ValueError:
+                for date_format in ("%Y-%m-%d", "%m/%d/%Y"):
                     try:
-                        parsed = datetime.strptime(value, "%m/%d/%Y")
+                        parsed = datetime.strptime(value, date_format)
+                        tool_input["date"] = parsed.strftime("%Y-%m-%d")
+                        break
                     except ValueError:
-                        # Also accept slash dates with a one-digit month/day.
-                        try:
-                            parsed = datetime.strptime(value, "%m/%d/%Y")
-                        except ValueError as exc:
-                            raise ValueError(
-                                f"get_flight_status date must be YYYY-MM-DD; got {value!r}"
-                            ) from exc
-                tool_input["date"] = parsed.strftime("%Y-%m-%d")
+                        continue
+                else:
+                    raise ValueError(
+                        f"get_flight_status date must be YYYY-MM-DD or MM/DD/YYYY; got {value!r}"
+                    )
+                                "date": {
+                "type": "string",
+                "description": "Use YYYY-MM-DD, for example 2025-05-08. Convert dates shown as MM/DD/YYYY.",
+                "pattern": r"^\d{4}-\d{2}-\d{2}$",
+            },
 
         if block.name in mcp_client.tool_names:
             output = mcp_client.call_remote(block.name, tool_input)
