@@ -29,7 +29,7 @@ def text_of(response) -> str:
 
 
 def tool_results(response) -> List[Dict[str, Any]]:
-    """Run tool calls, converting flight dates to the backend's required format."""
+    """Run tool calls, normalizing flight dates to the backend's required format."""
     results = []
 
     for block in response.content:
@@ -47,7 +47,7 @@ def tool_results(response) -> List[Dict[str, Any]]:
                         value, "%m/%d/%Y"
                     ).strftime("%Y-%m-%d")
                 except ValueError:
-                    # An already ISO-formatted date remains unchanged.
+                    # Keep an already-ISO date unchanged.
                     pass
 
         if block.name in mcp_client.tool_names:
