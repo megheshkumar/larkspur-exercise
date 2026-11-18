@@ -38,17 +38,26 @@ def tool_results(response) -> List[Dict[str, Any]]:
 
         tool_input = dict(block.input or {})
 
-        if block.name == "get_flight_status":
+        # Normalize the date at the dispatch boundary as a safeguard, even if the
+        # model returns a booking-style date instead of the format in the schema.
+        if block.name.split("__")[-1] == "get_flight_status":
             value = tool_input.get("date")
             if isinstance(value, str):
                 value = value.strip()
                 try:
-                    tool_input["date"] = datetime.strptime(
-                        value, "%m/%d/%Y"
-                    ).strftime("%Y-%m-%d")
+                    parsed = datetime.strptime(value, "%Y-%m-%d")
                 except ValueError:
-                    # Keep an already-ISO date unchanged.
-                    pass
+                    try:
+                        parsed = datetime.strptime(value, "%m/%d/%Y")
+                    except ValueError:
+                        # Also accept slash dates with a one-digit month/day.
+                        try:
+                            parsed = datetime.strptime(value, "%m/%d/%Y")
+                        except ValueError as exc:
+                            raise ValueError(
+                                f"get_flight_status date must be YYYY-MM-DD; got {value!r}"
+                            ) from exc
+                tool_input["date"] = parsed.strftime("%Y-%m-%d")
 
         if block.name in mcp_client.tool_names:
             output = mcp_client.call_remote(block.name, tool_input)
@@ -168,9 +177,8 @@ def build_tools() -> List[Dict[str, Any]]:                 # ✏️ Build 1, ste
                 "Look up a Larkspur or Larkspur Link flight's current OpsFeed status for "
                 "one local date: status, delay minutes, and cause. Use this before telling "
                 "a customer anything about flight timing; never state it from memory. "
-                "Always send the date as YYYY-MM-DD. If the booking shows a date as "
-                "MM/DD/YYYY (for example, 05/08/2025), convert it to YYYY-MM-DD "
-                "(2025-05-08); do not copy the booking's date format unchanged."
+                "The date argument MUST be an ISO date in YYYY-MM-DD format. Convert a "
+                "booking date such as 05/08/2025 to 2025-05-08; never pass MM/DD/YYYY."
             ),
             "input_schema": {
                 "type": "object",
@@ -178,7 +186,8 @@ def build_tools() -> List[Dict[str, Any]]:                 # ✏️ Build 1, ste
                     "flight_no": {"type": "string"},
                     "date": {
                         "type": "string",
-                        "description": "Required format: YYYY-MM-DD (for example, 2025-05-08). Convert MM/DD/YYYY booking dates to this format.",
+                        "description": "ISO date only: YYYY-MM-DD (example: 2025-05-08). Never send MM/DD/YYYY.",
+                        "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
                     },
                 },
                 "required": ["flight_no", "date"],
