@@ -150,13 +150,13 @@ def build_tools() -> List[Dict[str, Any]]:                 # ✏️ Build 1, ste
                 "required": ["pnr", "last_name"],
             },
         },
-                {
+                        {
             "name": "get_flight_status",
             "description": (
                 "Look up a Larkspur or Larkspur Link flight's current OpsFeed status for "
                 "one local date: status, delay minutes, and cause. Use this before telling "
-                "a customer anything about a flight's timing; never state it from memory. "
-                "The date must use YYYY-MM-DD format."
+                "a customer anything about flight timing; never state it from memory. "
+                "Pass the date in YYYY-MM-DD format, unchanged from the booking."
             ),
             "input_schema": {
                 "type": "object",
@@ -164,18 +164,18 @@ def build_tools() -> List[Dict[str, Any]]:                 # ✏️ Build 1, ste
                     "flight_no": {"type": "string"},
                     "date": {
                         "type": "string",
-                        "description": "Flight date in YYYY-MM-DD format, for example 2025-05-08",
+                        "description": "Flight date in YYYY-MM-DD format, for example 2025-05-08.",
                     },
                 },
                 "required": ["flight_no", "date"],
             },
         },
-                {
+                        {
             "name": "search_alternatives",
             "description": (
                 "Search for available Larkspur replacement flights for this booking. "
-                "Use the passenger's PNR to find candidate flights, fares, dates, "
-                "availability, and option IDs that can be held or offered."
+                "Provide the passenger's PNR. Returns candidate flights and option IDs "
+                "that can be offered or held for rebooking."
             ),
             "input_schema": {
                 "type": "object",
