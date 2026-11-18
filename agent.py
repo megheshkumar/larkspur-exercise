@@ -71,10 +71,10 @@ def run_agent(pnr: str, last_name: str, message: str) -> str:
 
     turns = 0
     while response.stop_reason == "tool_use" and turns < MAX_TOOL_CALLS:
-        messages.append({
-            "role": "assistant",
-            "content": response.content,
-        })
+       messages.append({
+    "role": "assistant",
+    "content": [block.model_dump(exclude_none=True) for block in response.content],
+})
         messages.append({
             "role": "user",
             "content": tool_results(response),
