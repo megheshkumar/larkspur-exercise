@@ -20,7 +20,21 @@ TONE_ADDENDUM = ""                       # ✏️ Build 4, step 4.1, intelligenc
 EXTRA_TOOLS: List[Dict[str, Any]] = []   # ✏️ Build 2, step 2.1: schemas for the tools you add
 LOCAL_TOOLS: Dict[str, Any] = {}         # ✏️ Build 2, step 2.1: the functions behind them
 
+        assistant_content = messages[-2]["content"]
+        result_content = messages[-1]["content"]
 
+        assistant_ids = [
+            block.get("id")
+            for block in assistant_content
+            if isinstance(block, dict) and block.get("type") == "tool_use"
+        ]
+        result_ids = [
+            block.get("tool_use_id")
+            for block in result_content
+            if isinstance(block, dict) and block.get("type") == "tool_result"
+        ]
+        print("DEBUG assistant tool-use IDs:", assistant_ids)
+        print("DEBUG tool-result IDs:", result_ids)
 def text_of(response) -> str:
     """Given. The last non-empty text block, never content[0]."""
     texts = [b.text for b in response.content if getattr(b, "type", None) == "text" and b.text]
