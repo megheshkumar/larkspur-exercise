@@ -37,6 +37,8 @@ def tool_results(response) -> List[Dict[str, Any]]:
 
         tool_input = dict(block.input or {})
 
+                tool_input = dict(block.input or {})
+
         if block.name == "get_flight_status":
             value = tool_input.get("date")
             if isinstance(value, str):
@@ -45,9 +47,7 @@ def tool_results(response) -> List[Dict[str, Any]]:
                         value.strip(), "%m/%d/%Y"
                     ).strftime("%Y-%m-%d")
                 except ValueError:
-                    # Leave an already-ISO date unchanged.
                     pass
-
         if block.name in mcp_client.tool_names:
             output = mcp_client.call_remote(block.name, tool_input)
         elif block.name in LOCAL_TOOLS:
