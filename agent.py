@@ -20,21 +20,7 @@ TONE_ADDENDUM = ""                       # ✏️ Build 4, step 4.1, intelligenc
 EXTRA_TOOLS: List[Dict[str, Any]] = []   # ✏️ Build 2, step 2.1: schemas for the tools you add
 LOCAL_TOOLS: Dict[str, Any] = {}         # ✏️ Build 2, step 2.1: the functions behind them
 
-        assistant_content = messages[-2]["content"]
-        result_content = messages[-1]["content"]
 
-        assistant_ids = [
-            block.get("id")
-            for block in assistant_content
-            if isinstance(block, dict) and block.get("type") == "tool_use"
-        ]
-        result_ids = [
-            block.get("tool_use_id")
-            for block in result_content
-            if isinstance(block, dict) and block.get("type") == "tool_result"
-        ]
-        print("DEBUG assistant tool-use IDs:", assistant_ids)
-        print("DEBUG tool-result IDs:", result_ids)
 def text_of(response) -> str:
     """Given. The last non-empty text block, never content[0]."""
     texts = [b.text for b in response.content if getattr(b, "type", None) == "text" and b.text]
@@ -85,11 +71,9 @@ def run_agent(pnr: str, last_name: str, message: str) -> str:
 
     turns = 0
     while response.stop_reason == "tool_use" and turns < MAX_TOOL_CALLS:
-       messages.append({
-    "role": "assistant",
-    "content": [block.model_dump(exclude_none=True) for block in response.content],
-})
-                       assistant_blocks = [
+        # Preserve the assistant's exact tool_use IDs, then return results for
+        # those IDs in the immediately following user message.
+        assistant_blocks = [
             block.model_dump(exclude_none=True)
             if hasattr(block, "model_dump")
             else dict(block)
@@ -98,6 +82,10 @@ def run_agent(pnr: str, last_name: str, message: str) -> str:
         messages.append({
             "role": "assistant",
             "content": assistant_blocks,
+        })
+        messages.append({
+            "role": "user",
+            "content": tool_results(response),
         })
 
         response = client.messages.create(
@@ -119,10 +107,10 @@ def tool_list() -> List[Dict[str, Any]]:                   # ✏️ Build 2, ste
     return build_tools() + EXTRA_TOOLS
 
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────[...]
 # Below this line: what Claude is told about each tool. Step 1.3.
 # The functions these describe are written and correct, in support/tools.py.
-# ──────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────[...]
 def build_tools() -> List[Dict[str, Any]]:                 # ✏️ Build 1, step 1.3
     """Anthropic-shaped schemas: name, description, input_schema. What Claude is
     told about each of the nine tools, and all it is ever told."""
