@@ -29,25 +29,27 @@ def text_of(response) -> str:
 
 
 def tool_results(response) -> List[Dict[str, Any]]:
-    """Run tool calls and normalize the flight date before dispatch."""
+    """Run tool calls, converting flight dates to the backend's required format."""
     results = []
+
     for block in response.content:
         if getattr(block, "type", None) != "tool_use":
             continue
 
         tool_input = dict(block.input or {})
 
-                tool_input = dict(block.input or {})
-
         if block.name == "get_flight_status":
             value = tool_input.get("date")
             if isinstance(value, str):
+                value = value.strip()
                 try:
                     tool_input["date"] = datetime.strptime(
-                        value.strip(), "%m/%d/%Y"
+                        value, "%m/%d/%Y"
                     ).strftime("%Y-%m-%d")
                 except ValueError:
+                    # An already ISO-formatted date remains unchanged.
                     pass
+
         if block.name in mcp_client.tool_names:
             output = mcp_client.call_remote(block.name, tool_input)
         elif block.name in LOCAL_TOOLS:
@@ -60,8 +62,8 @@ def tool_results(response) -> List[Dict[str, Any]]:
             "tool_use_id": block.id,
             "content": str(output),
         })
-    return results
 
+    return results
 def run_agent(pnr: str, last_name: str, message: str) -> str:
     """Run the tool loop until Claude stops asking for tools. Return its final text."""
     client, tracer = new_session()
