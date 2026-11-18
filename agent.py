@@ -28,22 +28,32 @@ def text_of(response) -> str:
 
 
 def tool_results(response) -> List[Dict[str, Any]]:
-    """Given. Runs every tool_use block and packages the results the way the
-    API expects them back. A tool can live in three places: the MCP server,
-    LOCAL_TOOLS, or support/tools.py."""
-    # three branches, no try/except in this file: mcp_client.call_remote() and
-    # support.call_local() answer with an error dict instead of raising, and both
-    # record what came back on the trace
+    """Run tool calls and return results, normalizing flight dates first."""
     results = []
     for block in response.content:
         if getattr(block, "type", None) != "tool_use":
             continue
+
+        # The backend requires YYYY-MM-DD. Normalize MM/DD/YYYY if the model
+        # supplies that format despite the schema instructions.
+        tool_input = dict(block.input or {})
+        if block.name == "get_flight_status":
+            flight_date = tool_input.get("date")
+            if flight_date:
+                try:
+                    parsed_date = datetime.strptime(flight_date, "%m/%d/%Y")
+                except ValueError:
+                    pass  # Already ISO, or invalid; let the tool validate it.
+                else:
+                    tool_input["date"] = parsed_date.strftime("%Y-%m-%d")
+
         if block.name in mcp_client.tool_names:
-            output = mcp_client.call_remote(block.name, block.input)
+            output = mcp_client.call_remote(block.name, tool_input)
         elif block.name in LOCAL_TOOLS:
-            output = call_local(LOCAL_TOOLS[block.name], block.name, block.input)
+            output = call_local(LOCAL_TOOLS[block.name], block.name, tool_input)
         else:
-            output = execute_tool(block.name, block.input)
+            output = execute_tool(block.name, tool_input)
+
         results.append({
             "type": "tool_result",
             "tool_use_id": block.id,
