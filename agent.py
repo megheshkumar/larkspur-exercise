@@ -89,9 +89,15 @@ def run_agent(pnr: str, last_name: str, message: str) -> str:
     "role": "assistant",
     "content": [block.model_dump(exclude_none=True) for block in response.content],
 })
+                       assistant_blocks = [
+            block.model_dump(exclude_none=True)
+            if hasattr(block, "model_dump")
+            else dict(block)
+            for block in response.content
+        ]
         messages.append({
-            "role": "user",
-            "content": tool_results(response),
+            "role": "assistant",
+            "content": assistant_blocks,
         })
 
         response = client.messages.create(
