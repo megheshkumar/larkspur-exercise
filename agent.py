@@ -172,27 +172,29 @@ def build_tools() -> List[Dict[str, Any]]:                 # ✏️ Build 1, ste
             },
         },
                         {
-            "name": "get_flight_status",
-            "description": (
-                "Look up a Larkspur or Larkspur Link flight's current OpsFeed status for "
-                "one local date: status, delay minutes, and cause. Use this before telling "
-                "a customer anything about flight timing; never state it from memory. "
-                "The date argument MUST be an ISO date in YYYY-MM-DD format. Convert a "
-                "booking date such as 05/08/2025 to 2025-05-08; never pass MM/DD/YYYY."
-            ),
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "flight_no": {"type": "string"},
-                    "date": {
-                        "type": "string",
-                        "description": "ISO date only: YYYY-MM-DD (example: 2025-05-08). Never send MM/DD/YYYY.",
-                        "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                    },
-                },
-                "required": ["flight_no", "date"],
+    "name": "get_flight_status",
+    "description": (
+        "Look up a Larkspur or Larkspur Link flight's current OpsFeed status for "
+        "one local date: status, delay minutes, and cause. Use this before telling "
+        "a customer anything about flight timing; never state it from memory. "
+        "The date argument MUST use YYYY-MM-DD. If the booking displays "
+        "MM/DD/YYYY, convert it: 05/08/2025 becomes 2025-05-08."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "flight_no": {"type": "string"},
+            "date": {
+                "type": "string",
+                "description": (
+                    "Required format: YYYY-MM-DD. Example: 2025-05-08. "
+                    "Convert MM/DD/YYYY booking dates before calling."
+                ),
             },
         },
+        "required": ["flight_no", "date"],
+    },
+},
                         {
             "name": "search_alternatives",
             "description": (
