@@ -69,15 +69,36 @@ def run_agent(pnr: str, last_name: str, message: str) -> str:
         messages=messages,
     )
 
-        turns = 1
+    turns = 1  # The first API request has already happened.
     while response.stop_reason == "tool_use" and turns < MAX_TOOL_CALLS:
-        # Keep Claude's tool_use blocks, including their IDs.
-        assistant_blocks = [
-            block.model_dump(exclude_none=True)
-            if hasattr(block, "model_dump")
-            else dict(block)
-            for block in response.content
-        ]
+        # Keep the tool-use ID, name, and input from this exact response.
+        assistant_blocks = []
+        for block in response.content:
+            if getattr(block, "type", None) == "tool_use":
+                assistant_blocks.append({
+                    "type": "tool_use",
+                    "id": block.id,
+                    "name": block.name,
+                    "input": block.input,
+                })
+            elif hasattr(block, "model_dump"):
+                assistant_blocks.append(block.model_dump(exclude_none=True))
+
+        results = tool_results(response)
+
+        # Do not send a result unless its tool call is in the assistant message.
+        assistant_ids = {
+            block["id"] for block in assistant_blocks
+            if block.get("type") == "tool_use"
+        }
+        result_ids = {
+            block["tool_use_id"] for block in results
+            if block.get("type") == "tool_result"
+        }
+        if not result_ids or not result_ids.issubset(assistant_ids):
+            raise RuntimeError(
+                f"Tool ID mismatch: assistant={assistant_ids}, results={result_ids}"
+            )
 
         messages.append({
             "role": "assistant",
@@ -85,7 +106,7 @@ def run_agent(pnr: str, last_name: str, message: str) -> str:
         })
         messages.append({
             "role": "user",
-            "content": tool_results(response),
+            "content": results,
         })
 
         response = client.messages.create(
