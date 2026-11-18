@@ -168,7 +168,9 @@ def build_tools() -> List[Dict[str, Any]]:                 # ✏️ Build 1, ste
                 "Look up a Larkspur or Larkspur Link flight's current OpsFeed status for "
                 "one local date: status, delay minutes, and cause. Use this before telling "
                 "a customer anything about flight timing; never state it from memory. "
-                "Pass the date in YYYY-MM-DD format, unchanged from the booking."
+                "Always send the date as YYYY-MM-DD. If the booking shows a date as "
+                "MM/DD/YYYY (for example, 05/08/2025), convert it to YYYY-MM-DD "
+                "(2025-05-08); do not copy the booking's date format unchanged."
             ),
             "input_schema": {
                 "type": "object",
@@ -176,7 +178,7 @@ def build_tools() -> List[Dict[str, Any]]:                 # ✏️ Build 1, ste
                     "flight_no": {"type": "string"},
                     "date": {
                         "type": "string",
-                        "description": "Flight date in YYYY-MM-DD format, for example 2025-05-08.",
+                        "description": "Required format: YYYY-MM-DD (for example, 2025-05-08). Convert MM/DD/YYYY booking dates to this format.",
                     },
                 },
                 "required": ["flight_no", "date"],
