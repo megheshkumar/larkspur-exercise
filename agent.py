@@ -69,6 +69,27 @@ def tool_results(response) -> List[Dict[str, Any]]:
     return results
 
 
+def _system_blocks() -> List[Dict[str, Any]]:
+    """Return a cacheable stable prefix followed by the per-request clock.
+
+    Tools are sent before system content in the Messages API, so placing an
+    ephemeral cache breakpoint on the stable system block caches both the tool
+    schemas and the stable instructions together. The dynamic clock is appended
+    after the breakpoint so it does not invalidate that reusable prefix.
+    """
+    return [
+        {
+            "type": "text",
+            "text": SYSTEM_PROMPT + TONE_ADDENDUM,
+            "cache_control": {"type": "ephemeral"},
+        },
+        {
+            "type": "text",
+            "text": runtime_preamble(),
+        },
+    ]
+
+
 def run_agent(pnr: str, last_name: str, message: str) -> str:
     """Run the tool loop until Claude stops asking for tools."""
     client, _tracer = new_session()
@@ -80,7 +101,7 @@ def run_agent(pnr: str, last_name: str, message: str) -> str:
     response = client.messages.create(
         model=MODEL,
         max_tokens=4096,
-        system=runtime_preamble() + SYSTEM_PROMPT + TONE_ADDENDUM,
+        system=_system_blocks(),
         thinking={"type": "adaptive"},
         tools=tools,
         messages=messages,
@@ -119,7 +140,7 @@ def run_agent(pnr: str, last_name: str, message: str) -> str:
         response = client.messages.create(
             model=MODEL,
             max_tokens=4096,
-            system=runtime_preamble() + SYSTEM_PROMPT + TONE_ADDENDUM,
+            system=_system_blocks(),
             thinking={"type": "adaptive"},
             tools=tools,
             messages=messages,
