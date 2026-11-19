@@ -69,6 +69,26 @@ def tool_results(response) -> List[Dict[str, Any]]:
     return results
 
 
+def _system_blocks() -> List[Dict[str, Any]]:
+    """Cache the stable tool + instruction prefix, leaving the clock uncached.
+
+    The Messages API prompt prefix starts with tool schemas and then system
+    blocks. Put the breakpoint on stable system instructions after all tools;
+    the request-specific clock follows it, so it cannot change the cache key.
+    """
+    return [
+        {
+            "type": "text",
+            "text": SYSTEM_PROMPT + TONE_ADDENDUM,
+            "cache_control": {"type": "ephemeral"},
+        },
+        {
+            "type": "text",
+            "text": runtime_preamble(),
+        },
+    ]
+
+
 def run_agent(pnr: str, last_name: str, message: str) -> str:
     """Run the tool loop until Claude stops asking for tools."""
     client, _tracer = new_session()
@@ -76,7 +96,7 @@ def run_agent(pnr: str, last_name: str, message: str) -> str:
     messages = [
         {"role": "user", "content": f"PNR {pnr}, last name {last_name}. {message}"},
     ]
-    system = runtime_preamble() + SYSTEM_PROMPT + TONE_ADDENDUM
+    system = _system_blocks()
 
     response = client.messages.create(
         model=MODEL,
@@ -131,12 +151,7 @@ def run_agent(pnr: str, last_name: str, message: str) -> str:
 
 
 def tool_list() -> List[Dict[str, Any]]:
-    """Offer server tools from MCP, with no second local registration.
-
-    Mark the final tool as the cache breakpoint. This makes the complete,
-    stable tool-schema prefix cacheable on every request; the changing customer
-    message and system clock come after it and cannot invalidate that prefix.
-    """
+    """Offer server tools from MCP, with no second local registration."""
     remote_tools = mcp_client.tools()
     remote_names = {tool["name"] for tool in remote_tools if tool.get("name")}
 
@@ -156,11 +171,7 @@ def tool_list() -> List[Dict[str, Any]]:
             continue
         seen.add(name)
         offered.append(schema)
-    tools = offered + remote_tools
-    if tools:
-        # Copy the last schema instead of mutating the MCP discovery cache.
-        tools[-1] = {**tools[-1], "cache_control": {"type": "ephemeral"}}
-    return tools
+    return offered + remote_tools
 
 
 def build_tools() -> List[Dict[str, Any]]:
