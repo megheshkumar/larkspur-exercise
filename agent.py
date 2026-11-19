@@ -15,7 +15,7 @@ from typing import Any, Dict, List
 
 from support import (MODEL, SYSTEM_PROMPT, call_local, execute_tool, mcp_client,
                      new_session, runtime_preamble)
-
+TONE_ADDENDUM = ""                       # ✏️ Build 4, step 4.1, intelligence goal
 MAX_TOOL_CALLS = 8
 
 TONE_ADDENDUM = ""
