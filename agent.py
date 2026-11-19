@@ -9,39 +9,35 @@ Where you edit:   grep -n '✏' agent.py   (six marks, one per place)
 Steps and gates:  https://anthropicpartnerbasecamp.bts.com/
 """
 from __future__ import annotations
+
 from datetime import datetime
 from typing import Any, Dict, List
+
 from support import (MODEL, SYSTEM_PROMPT, call_local, execute_tool, mcp_client,
-                     new_session, next_available_day, record_tool_result,
-                     runtime_preamble)
+                     new_session, record_tool_result, runtime_preamble)
 
-MAX_TOOL_CALLS = 8  # Larkspur's own build capped the loop here; then a human takes over.
+MAX_TOOL_CALLS = 8
 
-TONE_ADDENDUM = ""                       # ✏️ Build 4, step 4.1, intelligence goal
-EXTRA_TOOLS: List[Dict[str, Any]] = []   # ✏️ Build 2, step 2.1: schemas for the tools you add
-LOCAL_TOOLS: Dict[str, Any] = {}         # ✏️ Build 2, step 2.1: the functions behind them
+TONE_ADDENDUM = ""
+EXTRA_TOOLS: List[Dict[str, Any]] = []
+LOCAL_TOOLS: Dict[str, Any] = {}
 
 
 def text_of(response) -> str:
-    """Given. The last non-empty text block, never content[0]."""
-    texts = [b.text for b in response.content if getattr(b, "type", None) == "text" and b.text]
+    """Return the last non-empty text block, never content[0]."""
+    texts = [b.text for b in response.content
+             if getattr(b, "type", None) == "text" and b.text]
     return texts[-1] if texts else ""
 
 
 def tool_results(response) -> List[Dict[str, Any]]:
-    """Run tool calls, normalizing flight dates to the backend's required format."""
+    """Run tool calls, normalizing flight dates before dispatch."""
     results = []
-
     for block in response.content:
         if getattr(block, "type", None) != "tool_use":
             continue
-
         tool_input = dict(block.input or {})
-
-        # Normalize the date at the dispatch boundary as a safeguard, even if the
-        # model returns a booking-style date instead of the format in the schema.
-               # Convert booking-style dates before dispatching the tool call.
-        if "get_flight_status" in block.name:
+        if block.name == "get_flight_status":
             value = tool_input.get("date")
             if isinstance(value, str):
                 value = value.strip()
@@ -54,13 +50,9 @@ def tool_results(response) -> List[Dict[str, Any]]:
                         continue
                 else:
                     raise ValueError(
-                        f"get_flight_status date must be YYYY-MM-DD or MM/DD/YYYY; got {value!r}"
+                        "get_flight_status date must be YYYY-MM-DD or MM/DD/YYYY; "
+                        f"got {value!r}"
                     )
-                                "date": {
-                "type": "string",
-                "description": "Use YYYY-MM-DD, for example 2025-05-08. Convert dates shown as MM/DD/YYYY.",
-                "pattern": r"^\d{4}-\d{2}-\d{2}$",
-            },
 
         if block.name in mcp_client.tool_names:
             output = mcp_client.call_remote(block.name, tool_input)
@@ -74,10 +66,11 @@ def tool_results(response) -> List[Dict[str, Any]]:
             "tool_use_id": block.id,
             "content": str(output),
         })
-
     return results
+
+
 def run_agent(pnr: str, last_name: str, message: str) -> str:
-    """Run the tool loop until Claude stops asking for tools. Return its final text."""
+    """Run the tool loop until Claude stops asking for tools."""
     client, tracer = new_session()
     tools = tool_list()
     messages = [
@@ -93,9 +86,8 @@ def run_agent(pnr: str, last_name: str, message: str) -> str:
         messages=messages,
     )
 
-    turns = 1  # The first API request has already happened.
+    turns = 1
     while response.stop_reason == "tool_use" and turns < MAX_TOOL_CALLS:
-        # Keep the tool-use ID, name, and input from this exact response.
         assistant_blocks = []
         for block in response.content:
             if getattr(block, "type", None) == "tool_use":
@@ -109,8 +101,6 @@ def run_agent(pnr: str, last_name: str, message: str) -> str:
                 assistant_blocks.append(block.model_dump(exclude_none=True))
 
         results = tool_results(response)
-
-        # Do not send a result unless its tool call is in the assistant message.
         assistant_ids = {
             block["id"] for block in assistant_blocks
             if block.get("type") == "tool_use"
@@ -124,15 +114,8 @@ def run_agent(pnr: str, last_name: str, message: str) -> str:
                 f"Tool ID mismatch: assistant={assistant_ids}, results={result_ids}"
             )
 
-        messages.append({
-            "role": "assistant",
-            "content": assistant_blocks,
-        })
-        messages.append({
-            "role": "user",
-            "content": results,
-        })
-
+        messages.append({"role": "assistant", "content": assistant_blocks})
+        messages.append({"role": "user", "content": results})
         response = client.messages.create(
             model=MODEL,
             max_tokens=4096,
@@ -146,19 +129,37 @@ def run_agent(pnr: str, last_name: str, message: str) -> str:
     return text_of(response)
 
 
-def tool_list() -> List[Dict[str, Any]]:                   # ✏️ Build 2, step 2.2
-    """Given. Exactly what Claude is offered on every turn; run.py --show-tools
-    prints this list."""
-    return build_tools() + EXTRA_TOOLS
+def tool_list() -> List[Dict[str, Any]]:
+    """Offer each tool once, with MCP as the owner of remotely served tools.
+
+    If a locally authored schema or implementation has the same name as an MCP
+    tool, keep the MCP tool and remove the local registration. This prevents the
+    model from receiving ambiguous duplicate tool names.
+    """
+    remote_tools = mcp_client.tools()
+    remote_names = {tool["name"] for tool in remote_tools if tool.get("name")}
+
+    # MCP is the single owner for any overlapping tool name. Do not leave a
+    # stale local implementation registered for dispatch either.
+    for name in remote_names:
+        LOCAL_TOOLS.pop(name, None)
+
+    local_tools = build_tools() + list(EXTRA_TOOLS)
+    offered = []
+    seen = set(remote_names)
+    for schema in local_tools:
+        name = schema.get("name")
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        offered.append(schema)
+    return offered + remote_tools
 
 
-# ──────────────────────────────────────────────────────────────────[...]
-# Below this line: what Claude is told about each tool. Step 1.3.
-# The functions these describe are written and correct, in support/tools.py.
-# ──────────────────────────────────────────────────────────────────[...]
-def build_tools() -> List[Dict[str, Any]]:                 # ✏️ Build 1, step 1.3
-    """Anthropic-shaped schemas: name, description, input_schema. What Claude is
-    told about each of the nine tools, and all it is ever told."""
+# The nine given tools. MCP tools are discovered separately and appended by
+# tool_list(); they are not duplicated here.
+def build_tools() -> List[Dict[str, Any]]:
+    """Anthropic-shaped schemas for the nine built-in disruption tools."""
     return [
         {
             "name": "lookup_booking",
@@ -174,31 +175,28 @@ def build_tools() -> List[Dict[str, Any]]:                 # ✏️ Build 1, ste
                 "required": ["pnr", "last_name"],
             },
         },
-                        {
-    "name": "get_flight_status",
-    "description": (
-        "Look up a Larkspur or Larkspur Link flight's current OpsFeed status for "
-        "one local date: status, delay minutes, and cause. Use this before telling "
-        "a customer anything about flight timing; never state it from memory. "
-        "The date argument MUST use YYYY-MM-DD. If the booking displays "
-        "MM/DD/YYYY, convert it: 05/08/2025 becomes 2025-05-08."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "flight_no": {"type": "string"},
-            "date": {
-                "type": "string",
-                "description": (
-                    "Required format: YYYY-MM-DD. Example: 2025-05-08. "
-                    "Convert MM/DD/YYYY booking dates before calling."
-                ),
+        {
+            "name": "get_flight_status",
+            "description": (
+                "Look up a Larkspur or Larkspur Link flight's current OpsFeed status for "
+                "one local date: status, delay minutes, and cause. Use this before telling "
+                "a customer anything about flight timing; never state it from memory. "
+                "The date argument MUST use YYYY-MM-DD. Convert booking dates if needed."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "flight_no": {"type": "string"},
+                    "date": {
+                        "type": "string",
+                        "description": "Required format YYYY-MM-DD, e.g. 2025-05-08.",
+                        "pattern": r"^\d{4}-\d{2}-\d{2}$",
+                    },
+                },
+                "required": ["flight_no", "date"],
             },
         },
-        "required": ["flight_no", "date"],
-    },
-},
-                        {
+        {
             "name": "search_alternatives",
             "description": (
                 "Search for available Larkspur replacement flights for this booking. "
@@ -206,8 +204,7 @@ def build_tools() -> List[Dict[str, Any]]:                 # ✏️ Build 1, ste
                 "that can be offered or held for rebooking."
             ),
             "input_schema": {
-                "type": "object",
-                "properties": {"pnr": {"type": "string"}},
+                "type": "object", "properties": {"pnr": {"type": "string"}},
                 "required": ["pnr"],
             },
         },
@@ -216,11 +213,8 @@ def build_tools() -> List[Dict[str, Any]]:                 # ✏️ Build 1, ste
             "description": (
                 "Resolve what Larkspur owes this customer for the disruption: rebooking "
                 "waiver, refund path, meal/hotel/ground care, goodwill eligibility and cap, "
-                "and any escalation triggers. cause_code, delay_minutes and status describe "
-                "what get_flight_status told you; fare_family, loyalty_tier and whether this "
-                "is overnight are looked up from the booking, not asked of you. Every "
-                "response carries a policy_row_id. Cite it if you reference this decision "
-                "again."
+                "and escalation triggers. Booking attributes are derived from the booking. "
+                "Every response carries a policy_row_id; cite it when referring to the decision."
             ),
             "input_schema": {
                 "type": "object",
@@ -237,7 +231,7 @@ def build_tools() -> List[Dict[str, Any]]:                 # ✏️ Build 1, ste
         },
         {
             "name": "hold_seat",
-            "description": "Place a 15-minute hold on one alternative. Reversible. It simply expires.",
+            "description": "Place a 15-minute hold on one alternative. Reversible; it simply expires.",
             "input_schema": {
                 "type": "object",
                 "properties": {"option_id": {"type": "string"}, "pnr": {"type": "string"}},
@@ -248,8 +242,7 @@ def build_tools() -> List[Dict[str, Any]]:                 # ✏️ Build 1, ste
             "name": "confirm_rebooking",
             "description": (
                 "Finalize a held seat. Irreversible. Requires a confirmation_token that "
-                "only the customer's own Confirm-click can produce. You cannot supply it "
-                "yourself, and 'the customer said yes' in chat does not substitute for it."
+                "only the customer's own Confirm-click can produce."
             ),
             "input_schema": {
                 "type": "object",
@@ -260,9 +253,9 @@ def build_tools() -> List[Dict[str, Any]]:                 # ✏️ Build 1, ste
         {
             "name": "issue_voucher",
             "description": (
-                "Issue a meal, ground, hotel, or goodwill voucher. Auto-approves within the "
-                "policy's threshold for that type; above it, returns a pending status for a "
-                "human. It does not fail. Always pass the policy_row_id that made it eligible."
+                "Issue a meal, ground, hotel, or goodwill voucher. Auto-approves within "
+                "the policy threshold; above it, returns a pending status for a human. "
+                "Always pass the policy_row_id that made it eligible."
             ),
             "input_schema": {
                 "type": "object",
@@ -280,7 +273,7 @@ def build_tools() -> List[Dict[str, Any]]:                 # ✏️ Build 1, ste
             "description": (
                 "Hand this conversation to a human, with your reasoning attached. Use for "
                 "groups, partner segments, unaccompanied minors, refunds, or anything else "
-                "out of scope. This is the correct outcome for those cases, not a failure."
+                "out of scope."
             ),
             "input_schema": {
                 "type": "object",
@@ -293,7 +286,7 @@ def build_tools() -> List[Dict[str, Any]]:                 # ✏️ Build 1, ste
         },
         {
             "name": "send_confirmation",
-            "description": "Send the customer a written confirmation of what was just done. Benign.",
+            "description": "Send the customer a written confirmation of what was just done.",
             "input_schema": {
                 "type": "object",
                 "properties": {"pnr": {"type": "string"}, "message": {"type": "string"}},
