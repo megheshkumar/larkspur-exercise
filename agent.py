@@ -130,13 +130,18 @@ def run_agent(pnr: str, last_name: str, message: str) -> str:
 
 
 def tool_list() -> List[Dict[str, Any]]:
-    """Offer unique schemas; MCP owns any name it serves remotely."""
+    """Offer MCP tools and local tools with exactly one owner per name."""
     remote_tools = mcp_client.tools()
     remote_names = {tool["name"] for tool in remote_tools if tool.get("name")}
 
-    # Do not keep a local dispatcher for a name whose owner is the MCP server.
+    # MCP is the owner of its advertised names. Remove local implementations
+    # and schemas so they cannot remain registered or be offered a second time.
     for name in remote_names:
         LOCAL_TOOLS.pop(name, None)
+    EXTRA_TOOLS[:] = [
+        schema for schema in EXTRA_TOOLS
+        if schema.get("name") not in remote_names
+    ]
 
     offered = []
     seen = set(remote_names)
