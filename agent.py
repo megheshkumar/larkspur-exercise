@@ -22,6 +22,14 @@ TONE_ADDENDUM = ""
 EXTRA_TOOLS: List[Dict[str, Any]] = []
 LOCAL_TOOLS: Dict[str, Any] = {}
 
+# These tools are owned by the MCP server. Remove any team-authored copies at
+# import time too, so the ownership is unambiguous before tool_list() is called.
+MCP_TOOL_NAMES = {"next_available_day", "fare_rules"}
+EXTRA_TOOLS[:] = [tool for tool in EXTRA_TOOLS
+                  if tool.get("name") not in MCP_TOOL_NAMES]
+for _mcp_tool_name in MCP_TOOL_NAMES:
+    LOCAL_TOOLS.pop(_mcp_tool_name, None)
+
 
 def text_of(response) -> str:
     """Return the last non-empty text block, never content[0]."""
@@ -134,14 +142,12 @@ def tool_list() -> List[Dict[str, Any]]:
     remote_tools = mcp_client.tools()
     remote_names = {tool["name"] for tool in remote_tools if tool.get("name")}
 
-    # MCP is the owner of its advertised names. Remove local implementations
-    # and schemas so they cannot remain registered or be offered a second time.
+    # MCP is the owner of its advertised names. Remove any registrations added
+    # after import as well, and let the server's schema be the offered version.
     for name in remote_names:
         LOCAL_TOOLS.pop(name, None)
-    EXTRA_TOOLS[:] = [
-        schema for schema in EXTRA_TOOLS
-        if schema.get("name") not in remote_names
-    ]
+    EXTRA_TOOLS[:] = [tool for tool in EXTRA_TOOLS
+                      if tool.get("name") not in remote_names]
 
     offered = []
     seen = set(remote_names)
