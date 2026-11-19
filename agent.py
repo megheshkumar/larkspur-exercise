@@ -15,10 +15,10 @@ from typing import Any, Dict, List
 
 from support import (MODEL, SYSTEM_PROMPT, call_local, execute_tool, mcp_client,
                      new_session, runtime_preamble)
+
 TONE_ADDENDUM = ""                       # ✏️ Build 4, step 4.1, intelligence goal
 MAX_TOOL_CALLS = 8
 
-TONE_ADDENDUM = ""
 EXTRA_TOOLS: List[Dict[str, Any]] = []
 LOCAL_TOOLS: Dict[str, Any] = {}
 
@@ -69,27 +69,6 @@ def tool_results(response) -> List[Dict[str, Any]]:
     return results
 
 
-def _system_blocks() -> List[Dict[str, Any]]:
-    """Return a cacheable stable prefix followed by the per-request clock.
-
-    Tools are sent before system content in the Messages API, so placing an
-    ephemeral cache breakpoint on the stable system block caches both the tool
-    schemas and the stable instructions together. The dynamic clock is appended
-    after the breakpoint so it does not invalidate that reusable prefix.
-    """
-    return [
-        {
-            "type": "text",
-            "text": SYSTEM_PROMPT + TONE_ADDENDUM,
-            "cache_control": {"type": "ephemeral"},
-        },
-        {
-            "type": "text",
-            "text": runtime_preamble(),
-        },
-    ]
-
-
 def run_agent(pnr: str, last_name: str, message: str) -> str:
     """Run the tool loop until Claude stops asking for tools."""
     client, _tracer = new_session()
@@ -97,11 +76,12 @@ def run_agent(pnr: str, last_name: str, message: str) -> str:
     messages = [
         {"role": "user", "content": f"PNR {pnr}, last name {last_name}. {message}"},
     ]
+    system = runtime_preamble() + SYSTEM_PROMPT + TONE_ADDENDUM
 
     response = client.messages.create(
         model=MODEL,
         max_tokens=4096,
-        system=_system_blocks(),
+        system=system,
         thinking={"type": "adaptive"},
         tools=tools,
         messages=messages,
@@ -140,7 +120,7 @@ def run_agent(pnr: str, last_name: str, message: str) -> str:
         response = client.messages.create(
             model=MODEL,
             max_tokens=4096,
-            system=_system_blocks(),
+            system=system,
             thinking={"type": "adaptive"},
             tools=tools,
             messages=messages,
@@ -151,7 +131,12 @@ def run_agent(pnr: str, last_name: str, message: str) -> str:
 
 
 def tool_list() -> List[Dict[str, Any]]:
-    """Offer server tools from MCP, with no second local registration."""
+    """Offer server tools from MCP, with no second local registration.
+
+    Mark the final tool as the cache breakpoint. This makes the complete,
+    stable tool-schema prefix cacheable on every request; the changing customer
+    message and system clock come after it and cannot invalidate that prefix.
+    """
     remote_tools = mcp_client.tools()
     remote_names = {tool["name"] for tool in remote_tools if tool.get("name")}
 
@@ -171,7 +156,11 @@ def tool_list() -> List[Dict[str, Any]]:
             continue
         seen.add(name)
         offered.append(schema)
-    return offered + remote_tools
+    tools = offered + remote_tools
+    if tools:
+        # Copy the last schema instead of mutating the MCP discovery cache.
+        tools[-1] = {**tools[-1], "cache_control": {"type": "ephemeral"}}
+    return tools
 
 
 def build_tools() -> List[Dict[str, Any]]:
