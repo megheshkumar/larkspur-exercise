@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Any, Dict, List
 
 from support import (MODEL, SYSTEM_PROMPT, call_local, execute_tool, mcp_client,
-                     new_session, record_tool_result, runtime_preamble)
+                     new_session, runtime_preamble)
 
 MAX_TOOL_CALLS = 8
 
@@ -71,7 +71,7 @@ def tool_results(response) -> List[Dict[str, Any]]:
 
 def run_agent(pnr: str, last_name: str, message: str) -> str:
     """Run the tool loop until Claude stops asking for tools."""
-    client, tracer = new_session()
+    client, _tracer = new_session()
     tools = tool_list()
     messages = [
         {"role": "user", "content": f"PNR {pnr}, last name {last_name}. {message}"},
@@ -130,24 +130,17 @@ def run_agent(pnr: str, last_name: str, message: str) -> str:
 
 
 def tool_list() -> List[Dict[str, Any]]:
-    """Offer each tool once, with MCP as the owner of remotely served tools.
-
-    If a locally authored schema or implementation has the same name as an MCP
-    tool, keep the MCP tool and remove the local registration. This prevents the
-    model from receiving ambiguous duplicate tool names.
-    """
+    """Offer unique schemas; MCP owns any name it serves remotely."""
     remote_tools = mcp_client.tools()
     remote_names = {tool["name"] for tool in remote_tools if tool.get("name")}
 
-    # MCP is the single owner for any overlapping tool name. Do not leave a
-    # stale local implementation registered for dispatch either.
+    # Do not keep a local dispatcher for a name whose owner is the MCP server.
     for name in remote_names:
         LOCAL_TOOLS.pop(name, None)
 
-    local_tools = build_tools() + list(EXTRA_TOOLS)
     offered = []
     seen = set(remote_names)
-    for schema in local_tools:
+    for schema in build_tools() + list(EXTRA_TOOLS):
         name = schema.get("name")
         if not name or name in seen:
             continue
@@ -156,8 +149,6 @@ def tool_list() -> List[Dict[str, Any]]:
     return offered + remote_tools
 
 
-# The nine given tools. MCP tools are discovered separately and appended by
-# tool_list(); they are not duplicated here.
 def build_tools() -> List[Dict[str, Any]]:
     """Anthropic-shaped schemas for the nine built-in disruption tools."""
     return [
@@ -181,7 +172,7 @@ def build_tools() -> List[Dict[str, Any]]:
                 "Look up a Larkspur or Larkspur Link flight's current OpsFeed status for "
                 "one local date: status, delay minutes, and cause. Use this before telling "
                 "a customer anything about flight timing; never state it from memory. "
-                "The date argument MUST use YYYY-MM-DD. Convert booking dates if needed."
+                "Use YYYY-MM-DD dates, converting booking dates if needed."
             ),
             "input_schema": {
                 "type": "object",
@@ -204,7 +195,8 @@ def build_tools() -> List[Dict[str, Any]]:
                 "that can be offered or held for rebooking."
             ),
             "input_schema": {
-                "type": "object", "properties": {"pnr": {"type": "string"}},
+                "type": "object",
+                "properties": {"pnr": {"type": "string"}},
                 "required": ["pnr"],
             },
         },
@@ -213,7 +205,7 @@ def build_tools() -> List[Dict[str, Any]]:
             "description": (
                 "Resolve what Larkspur owes this customer for the disruption: rebooking "
                 "waiver, refund path, meal/hotel/ground care, goodwill eligibility and cap, "
-                "and escalation triggers. Booking attributes are derived from the booking. "
+                "and any escalation triggers. Booking attributes are derived from the booking. "
                 "Every response carries a policy_row_id; cite it when referring to the decision."
             ),
             "input_schema": {
@@ -242,7 +234,7 @@ def build_tools() -> List[Dict[str, Any]]:
             "name": "confirm_rebooking",
             "description": (
                 "Finalize a held seat. Irreversible. Requires a confirmation_token that "
-                "only the customer's own Confirm-click can produce."
+                "only the customer's own Confirm-click can produce; chat consent is not a substitute."
             ),
             "input_schema": {
                 "type": "object",
@@ -273,7 +265,7 @@ def build_tools() -> List[Dict[str, Any]]:
             "description": (
                 "Hand this conversation to a human, with your reasoning attached. Use for "
                 "groups, partner segments, unaccompanied minors, refunds, or anything else "
-                "out of scope."
+                "out of scope. This is the correct outcome for those cases, not a failure."
             ),
             "input_schema": {
                 "type": "object",
